@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lifei6671/mindoc/utils/sqltil"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -61,6 +62,9 @@ func (c *BookController) Index() {
 	} else {
 		c.Data["Result"] = template.JS(string(b))
 	}
+	if itemsets, err := models.NewItemsets().First(1); err == nil {
+		c.Data["Item"] = itemsets
+	}
 }
 
 // Dashboard 项目概要 .
@@ -79,8 +83,8 @@ func (c *BookController) Dashboard() {
 		if err == models.ErrPermissionDenied {
 			c.Abort("403")
 		}
-		beego.Error(err)
 		c.Abort("500")
+		return
 	}
 
 	c.Data["Description"] = template.HTML(blackfriday.Run([]byte(book.Description)))
@@ -107,6 +111,7 @@ func (c *BookController) Setting() {
 			c.Abort("403")
 		}
 		c.Abort("500")
+		return
 	}
 	//如果不是创始人也不是管理员则不能操作
 	if book.RoleId != conf.BookFounder && book.RoleId != conf.BookAdmin {
@@ -136,7 +141,7 @@ func (c *BookController) SaveBook() {
 	bookName := strings.TrimSpace(c.GetString("book_name"))
 	description := strings.TrimSpace(c.GetString("description", ""))
 	commentStatus := c.GetString("comment_status")
-	tag := strings.TrimSpace(c.GetString("label"))
+	//tag := strings.TrimSpace(c.GetString("label"))
 	editor := strings.TrimSpace(c.GetString("editor"))
 	autoRelease := strings.TrimSpace(c.GetString("auto_release")) == "on"
 	publisher := strings.TrimSpace(c.GetString("publisher"))
@@ -144,6 +149,8 @@ func (c *BookController) SaveBook() {
 	isDownload := strings.TrimSpace(c.GetString("is_download")) == "on"
 	enableShare := strings.TrimSpace(c.GetString("enable_share")) == "on"
 	isUseFirstDocument := strings.TrimSpace(c.GetString("is_use_first_document")) == "on"
+	autoSave := strings.TrimSpace(c.GetString("auto_save")) == "on"
+	itemId, _ := c.GetInt("itemId")
 
 	if strings.Count(description, "") > 500 {
 		c.JsonResult(6004, "项目描述不能大于500字")
@@ -151,11 +158,9 @@ func (c *BookController) SaveBook() {
 	if commentStatus != "open" && commentStatus != "closed" && commentStatus != "group_only" && commentStatus != "registered_only" {
 		commentStatus = "closed"
 	}
-	if tag != "" {
-		tags := strings.Split(tag, ",")
-		if len(tags) > 10 {
-			c.JsonResult(6005, "最多允许添加10个标签")
-		}
+
+	if !models.NewItemsets().Exist(itemId) {
+		c.JsonResult(6006, "项目空间不存在")
 	}
 	if editor != "markdown" && editor != "html" {
 		editor = "markdown"
@@ -165,10 +170,12 @@ func (c *BookController) SaveBook() {
 	book.Description = description
 	book.CommentStatus = commentStatus
 	book.Publisher = publisher
-	book.Label = tag
+	//book.Label = tag
 	book.Editor = editor
 	book.HistoryCount = historyCount
 	book.IsDownload = 0
+	book.BookPassword = strings.TrimSpace(c.GetString("bPassword"))
+	book.ItemId = itemId
 
 	if autoRelease {
 		book.AutoRelease = 1
@@ -190,13 +197,20 @@ func (c *BookController) SaveBook() {
 	} else {
 		book.IsUseFirstDocument = 0
 	}
+	if autoSave {
+		book.AutoSave = 1
+	} else {
+		book.AutoSave = 0
+	}
 	if err := book.Update(); err != nil {
 		c.JsonResult(6006, "保存失败")
 	}
 	bookResult.BookName = bookName
 	bookResult.Description = description
 	bookResult.CommentStatus = commentStatus
-	bookResult.Label = tag
+
+	beego.Info("用户 [", c.Member.Account, "] 修改了项目 ->", book)
+
 	c.JsonResult(0, "ok", bookResult)
 }
 
@@ -219,6 +233,7 @@ func (c *BookController) PrivatelyOwned() {
 
 	if err != nil {
 		c.JsonResult(6001, err.Error())
+		return
 	}
 	//只有创始人才能变更私有状态
 	if bookResult.RoleId != conf.BookFounder {
@@ -229,6 +244,7 @@ func (c *BookController) PrivatelyOwned() {
 
 	if err != nil {
 		c.JsonResult(6005, "项目不存在")
+		return
 	}
 	book.PrivatelyOwned = state
 
@@ -238,6 +254,7 @@ func (c *BookController) PrivatelyOwned() {
 		logs.Error("PrivatelyOwned => ", err)
 		c.JsonResult(6004, "保存失败")
 	}
+	beego.Info("用户 【", c.Member.Account, "]修改了项目权限 ->", state)
 	c.JsonResult(0, "ok")
 }
 
@@ -265,12 +282,13 @@ func (c *BookController) Transfer() {
 
 	if err != nil {
 		c.JsonResult(6001, err.Error())
+		return
 	}
 
 	err = models.NewRelationship().Transfer(bookResult.BookId, c.Member.MemberId, member.MemberId)
 
 	if err != nil {
-		logs.Error("Transfer => ", err)
+		logs.Error("转让项目失败 -> ", err)
 		c.JsonResult(6008, err.Error())
 	}
 	c.JsonResult(0, "ok")
@@ -283,6 +301,7 @@ func (c *BookController) UploadCover() {
 
 	if err != nil {
 		c.JsonResult(6001, err.Error())
+		return
 	}
 	book, err := models.NewBook().Find(bookResult.BookId)
 
@@ -292,12 +311,13 @@ func (c *BookController) UploadCover() {
 	}
 
 	file, moreFile, err := c.GetFile("image-file")
-	defer file.Close()
 
 	if err != nil {
-		logs.Error("", err.Error())
+		logs.Error("获取上传文件失败 ->", err.Error())
 		c.JsonResult(500, "读取文件异常")
+		return
 	}
+	defer file.Close()
 
 	ext := filepath.Ext(moreFile.Filename)
 
@@ -317,7 +337,8 @@ func (c *BookController) UploadCover() {
 
 	fileName := "cover_" + strconv.FormatInt(time.Now().UnixNano(), 16)
 
-	filePath := filepath.Join("uploads", time.Now().Format("200601"), fileName+ext)
+	//附件路径按照项目组织
+	filePath := filepath.Join("uploads", book.Identify, "images", fileName+ext)
 
 	path := filepath.Dir(filePath)
 
@@ -344,7 +365,7 @@ func (c *BookController) UploadCover() {
 	filePath = filepath.Join(conf.WorkingDirectory, "uploads", time.Now().Format("200601"), fileName+"_small"+ext)
 
 	//生成缩略图并保存到磁盘
-	err = graphics.ImageResizeSaveFile(subImg, 175, 230, filePath)
+	err = graphics.ImageResizeSaveFile(subImg, 350, 460, filePath)
 
 	if err != nil {
 		logs.Error("ImageResizeSaveFile => ", err.Error())
@@ -368,6 +389,7 @@ func (c *BookController) UploadCover() {
 	if oldCover != conf.GetDefaultCover() {
 		os.Remove("." + oldCover)
 	}
+	beego.Info("用户[", c.Member.Account, "]上传了项目封面 ->", book.BookName, book.BookId, book.Cover)
 
 	c.JsonResult(0, "ok", url)
 }
@@ -381,7 +403,7 @@ func (c *BookController) Users() {
 	pageIndex, _ := c.GetInt("page", 1)
 
 	if key == "" {
-		c.Abort("404")
+		c.ShowErrorPage(404, "项目不存在或已删除")
 	}
 
 	book, err := models.NewBookResult().FindByIdentify(key, c.Member.MemberId)
@@ -390,11 +412,15 @@ func (c *BookController) Users() {
 			c.Abort("403")
 		}
 		c.Abort("500")
+		return
 	}
-
+	//如果不是创始人也不是管理员则不能操作
+	if book.RoleId != conf.BookFounder && book.RoleId != conf.BookAdmin {
+		c.Abort("403")
+	}
 	c.Data["Model"] = *book
 
-	members, totalCount, err := models.NewMemberRelationshipResult().FindForUsersByBookId(book.BookId, pageIndex, 15)
+	members, totalCount, err := models.NewMemberRelationshipResult().FindForUsersByBookId(book.BookId, pageIndex, conf.PageSize)
 
 	if totalCount > 0 {
 		pager := pagination.NewPagination(c.Ctx.Request, totalCount, conf.PageSize, c.BaseUrl())
@@ -415,13 +441,14 @@ func (c *BookController) Users() {
 func (c *BookController) Create() {
 
 	if c.Ctx.Input.IsPost() {
-		book_name := strings.TrimSpace(c.GetString("book_name", ""))
+		bookName := strings.TrimSpace(c.GetString("book_name", ""))
 		identify := strings.TrimSpace(c.GetString("identify", ""))
 		description := strings.TrimSpace(c.GetString("description", ""))
 		privatelyOwned, _ := strconv.Atoi(c.GetString("privately_owned"))
-		comment_status := c.GetString("comment_status")
+		commentStatus := c.GetString("comment_status")
+		itemId, _ := c.GetInt("itemId")
 
-		if book_name == "" {
+		if bookName == "" {
 			c.JsonResult(6001, "项目名称不能为空")
 		}
 		if identify == "" {
@@ -439,8 +466,11 @@ func (c *BookController) Create() {
 		if privatelyOwned != 0 && privatelyOwned != 1 {
 			privatelyOwned = 1
 		}
-		if comment_status != "open" && comment_status != "closed" && comment_status != "group_only" && comment_status != "registered_only" {
-			comment_status = "closed"
+		if !models.NewItemsets().Exist(itemId) {
+			c.JsonResult(6005, "项目空间不存在")
+		}
+		if commentStatus != "open" && commentStatus != "closed" && commentStatus != "group_only" && commentStatus != "registered_only" {
+			commentStatus = "closed"
 		}
 		book := models.NewBook()
 		book.Cover = conf.GetDefaultCover()
@@ -473,15 +503,15 @@ func (c *BookController) Create() {
 			}
 		}
 
-		if books, _ := book.FindByField("identify", identify,"book_id"); len(books) > 0 {
+		if books, _ := book.FindByField("identify", identify, "book_id"); len(books) > 0 {
 			c.JsonResult(6006, "项目标识已存在")
 		}
 
-		book.BookName = book_name
+		book.BookName = bookName
 		book.Description = description
 		book.CommentCount = 0
 		book.PrivatelyOwned = privatelyOwned
-		book.CommentStatus = comment_status
+		book.CommentStatus = commentStatus
 		book.Identify = identify
 		book.DocCount = 0
 		book.MemberId = c.Member.MemberId
@@ -491,6 +521,7 @@ func (c *BookController) Create() {
 		book.IsUseFirstDocument = 1
 		book.IsDownload = 1
 		book.AutoRelease = 0
+		book.ItemId = itemId
 
 		book.Editor = "markdown"
 		book.Theme = "default"
@@ -505,9 +536,36 @@ func (c *BookController) Create() {
 			beego.Error(err)
 		}
 
+		beego.Info("用户[", c.Member.Account, "]创建了项目 ->", book)
 		c.JsonResult(0, "ok", bookResult)
 	}
 	c.JsonResult(6001, "error")
+}
+
+//复制项目
+func (c *BookController) Copy() {
+	if c.Ctx.Input.IsPost() {
+		//检查是否有复制项目的权限
+		if _, err := c.IsPermission(); err != nil {
+			c.JsonResult(500, err.Error())
+		}
+
+		identify := strings.TrimSpace(c.GetString("identify", ""))
+		if identify == "" {
+			c.JsonResult(6001, "参数错误")
+		}
+		book := models.NewBook()
+		err := book.Copy(identify)
+		if err != nil {
+			c.JsonResult(6002, "复制项目出错")
+		} else {
+			bookResult, err := models.NewBookResult().FindByIdentify(book.Identify, c.Member.MemberId)
+			if err != nil {
+				beego.Error("查询失败")
+			}
+			c.JsonResult(0, "ok", bookResult)
+		}
+	}
 }
 
 //导入zip压缩包
@@ -524,6 +582,7 @@ func (c *BookController) Import() {
 	identify := strings.TrimSpace(c.GetString("identify"))
 	description := strings.TrimSpace(c.GetString("description", ""))
 	privatelyOwned, _ := strconv.Atoi(c.GetString("privately_owned"))
+	itemId, _ := c.GetInt("itemId")
 
 	if bookName == "" {
 		c.JsonResult(6001, "项目名称不能为空")
@@ -537,6 +596,9 @@ func (c *BookController) Import() {
 	if ok, err := regexp.MatchString(`^[a-z]+[a-zA-Z0-9_\-]*$`, identify); !ok || err != nil {
 		c.JsonResult(6003, "项目标识只能包含小写字母、数字，以及“-”和“_”符号,并且只能小写字母开头")
 	}
+	if !models.NewItemsets().Exist(itemId) {
+		c.JsonResult(6007, "项目空间不存在")
+	}
 	if strings.Count(identify, "") > 50 {
 		c.JsonResult(6004, "文档标识不能超过50字")
 	}
@@ -547,7 +609,7 @@ func (c *BookController) Import() {
 		c.JsonResult(6004, "不支持的文件类型")
 	}
 
-	if books, _ := models.NewBook().FindByField("identify", identify,"book_id"); len(books) > 0 {
+	if books, _ := models.NewBook().FindByField("identify", identify, "book_id"); len(books) > 0 {
 		c.JsonResult(6006, "项目标识已存在")
 	}
 
@@ -573,58 +635,62 @@ func (c *BookController) Import() {
 	book.MemberId = c.Member.MemberId
 	book.CommentCount = 0
 	book.Version = time.Now().Unix()
+	book.ItemId = itemId
 
 	book.Editor = "markdown"
 	book.Theme = "default"
 
-
 	go book.ImportBook(tempPath)
+
+	beego.Info("用户[", c.Member.Account, "]导入了项目 ->", book)
 
 	c.JsonResult(0, "项目正在后台转换中，请稍后查看")
 }
 
 // CreateToken 创建访问来令牌.
-func (c *BookController) CreateToken() {
-
-	action := c.GetString("action")
-
-	bookResult, err := c.IsPermission()
-
-	if err != nil {
-		if err == models.ErrPermissionDenied {
-			c.JsonResult(403, "权限不足")
-		}
-		if err == orm.ErrNoRows {
-			c.JsonResult(404, "项目不存在")
-		}
-		logs.Error("生成阅读令牌失败 =>", err)
-		c.JsonResult(6002, err.Error())
-	}
-	book := models.NewBook()
-
-	if _, err := book.Find(bookResult.BookId); err != nil {
-		c.JsonResult(6001, "项目不存在")
-	}
-	if action == "create" {
-		if bookResult.PrivatelyOwned == 0 {
-			c.JsonResult(6001, "公开项目不能创建阅读令牌")
-		}
-
-		book.PrivateToken = string(utils.Krand(conf.GetTokenSize(), utils.KC_RAND_KIND_ALL))
-		if err := book.Update(); err != nil {
-			logs.Error("生成阅读令牌失败 => ", err)
-			c.JsonResult(6003, "生成阅读令牌失败")
-		}
-		c.JsonResult(0, "ok", conf.URLFor("DocumentController.Index", ":key", book.Identify, "token", book.PrivateToken))
-	} else {
-		book.PrivateToken = ""
-		if err := book.Update(); err != nil {
-			logs.Error("CreateToken => ", err)
-			c.JsonResult(6004, "删除令牌失败")
-		}
-		c.JsonResult(0, "ok", "")
-	}
-}
+//func (c *BookController) CreateToken() {
+//
+//	action := c.GetString("action")
+//
+//	bookResult, err := c.IsPermission()
+//
+//	if err != nil {
+//		if err == models.ErrPermissionDenied {
+//			c.JsonResult(403, "权限不足")
+//		}
+//		if err == orm.ErrNoRows {
+//			c.JsonResult(404, "项目不存在")
+//		}
+//		logs.Error("生成阅读令牌失败 =>", err)
+//		c.JsonResult(6002, err.Error())
+//	}
+//	book := models.NewBook()
+//
+//	if _, err := book.Find(bookResult.BookId); err != nil {
+//		c.JsonResult(6001, "项目不存在")
+//	}
+//	if action == "create" {
+//		if bookResult.PrivatelyOwned == 0 {
+//			c.JsonResult(6001, "公开项目不能创建阅读令牌")
+//		}
+//
+//		book.PrivateToken = string(utils.Krand(conf.GetTokenSize(), utils.KC_RAND_KIND_ALL))
+//		if err := book.Update(); err != nil {
+//			logs.Error("生成阅读令牌失败 => ", err)
+//			c.JsonResult(6003, "生成阅读令牌失败")
+//		}
+//		beego.Info("用户[", c.Member.Account, "]创建项目令牌 ->", book.PrivateToken)
+//		c.JsonResult(0, "ok", conf.URLFor("DocumentController.Index", ":key", book.Identify, "token", book.PrivateToken))
+//	} else {
+//		book.PrivateToken = ""
+//		if err := book.Update(); err != nil {
+//			logs.Error("CreateToken => ", err)
+//			c.JsonResult(6004, "删除令牌失败")
+//		}
+//		beego.Info("用户[", c.Member.Account, "]创建项目令牌 ->", book.PrivateToken)
+//		c.JsonResult(0, "ok", "")
+//	}
+//}
 
 // Delete 删除项目.
 func (c *BookController) Delete() {
@@ -634,6 +700,7 @@ func (c *BookController) Delete() {
 
 	if err != nil {
 		c.JsonResult(6001, err.Error())
+		return
 	}
 
 	if bookResult.RoleId != conf.BookFounder {
@@ -648,6 +715,7 @@ func (c *BookController) Delete() {
 		logs.Error("删除项目 => ", err)
 		c.JsonResult(6003, "删除失败")
 	}
+	beego.Info("用户[", c.Member.Account, "]删除了项目 ->", bookResult)
 	c.JsonResult(0, "ok")
 }
 
@@ -662,7 +730,9 @@ func (c *BookController) Release() {
 	if c.Member.IsAdministrator() {
 		book, err := models.NewBook().FindByFieldFirst("identify", identify)
 		if err != nil {
-
+			beego.Error("发布文档失败 ->", err)
+			c.JsonResult(6003, "文档不存在")
+			return
 		}
 		bookId = book.BookId
 	} else {
@@ -683,14 +753,7 @@ func (c *BookController) Release() {
 		}
 		bookId = book.BookId
 	}
-	go func(identify string) {
-		models.NewBook().ReleaseContent(bookId)
-
-		//当文档发布后，需要删除已缓存的转换项目
-		outputPath := filepath.Join(beego.AppConfig.DefaultString("book_output_path", "cache"), strconv.Itoa(bookId))
-		os.RemoveAll(outputPath)
-
-	}(identify)
+	go models.NewBook().ReleaseContent(bookId)
 
 	c.JsonResult(0, "发布任务已推送到任务队列，稍后将在后台执行。")
 }
@@ -704,13 +767,14 @@ func (c *BookController) SaveSort() {
 		c.Abort("404")
 	}
 
-	book_id := 0
+	bookId := 0
 	if c.Member.IsAdministrator() {
 		book, err := models.NewBook().FindByFieldFirst("identify", identify)
-		if err != nil {
-
+		if err != nil || book == nil {
+			c.JsonResult(6001,"项目不存在")
+			return
 		}
-		book_id = book.BookId
+		bookId = book.BookId
 	} else {
 		bookResult, err := models.NewBookResult().FindByIdentify(identify, c.Member.MemberId)
 		if err != nil {
@@ -721,7 +785,7 @@ func (c *BookController) SaveSort() {
 		if bookResult.RoleId == conf.BookObserver {
 			c.JsonResult(6002, "项目不存在或权限不足")
 		}
-		book_id = bookResult.BookId
+		bookId = bookResult.BookId
 	}
 
 	content := c.Ctx.Input.RequestBody
@@ -736,13 +800,13 @@ func (c *BookController) SaveSort() {
 	}
 
 	for _, item := range docs {
-		if doc_id, ok := item["id"].(float64); ok {
-			doc, err := models.NewDocument().Find(int(doc_id))
+		if docId, ok := item["id"].(float64); ok {
+			doc, err := models.NewDocument().Find(int(docId))
 			if err != nil {
 				beego.Error(err)
 				continue
 			}
-			if doc.BookId != book_id {
+			if doc.BookId != bookId {
 				logs.Info("%s", "权限错误")
 				continue
 			}
@@ -751,18 +815,18 @@ func (c *BookController) SaveSort() {
 				beego.Info("排序数字转换失败 => ", item)
 				continue
 			}
-			parent_id, ok := item["parent"].(float64)
+			parentId, ok := item["parent"].(float64)
 			if !ok {
 				beego.Info("父分类转换失败 => ", item)
 				continue
 			}
-			if parent_id > 0 {
-				if parent, err := models.NewDocument().Find(int(parent_id)); err != nil || parent.BookId != book_id {
+			if parentId > 0 {
+				if parent, err := models.NewDocument().Find(int(parentId)); err != nil || parent.BookId != bookId {
 					continue
 				}
 			}
 			doc.OrderSort = int(sort)
-			doc.ParentId = int(parent_id)
+			doc.ParentId = int(parentId)
 			if err := doc.InsertOrUpdate(); err != nil {
 				fmt.Printf("%s", err.Error())
 				beego.Error(err)
@@ -775,8 +839,160 @@ func (c *BookController) SaveSort() {
 	c.JsonResult(0, "ok")
 }
 
+func (c *BookController) Team() {
+	c.Prepare()
+	c.TplName = "book/team.tpl"
+
+	key := c.Ctx.Input.Param(":key")
+	pageIndex, _ := c.GetInt("page", 1)
+
+	if key == "" {
+		c.ShowErrorPage(404, "项目不存在或已删除")
+	}
+
+	book, err := models.NewBookResult().FindByIdentify(key, c.Member.MemberId)
+	if err != nil || book == nil {
+		if err == models.ErrPermissionDenied {
+			c.ShowErrorPage(403, "权限不足")
+		}
+		c.ShowErrorPage(500, "系统错误")
+		return
+	}
+	//如果不是创始人也不是管理员则不能操作
+	if book.RoleId != conf.BookFounder && book.RoleId != conf.BookAdmin {
+		c.Abort("403")
+	}
+	c.Data["Model"] = book
+
+	members, totalCount, err := models.NewTeamRelationship().FindByBookToPager(book.BookId, pageIndex, conf.PageSize)
+
+	if totalCount > 0 {
+		pager := pagination.NewPagination(c.Ctx.Request, totalCount, conf.PageSize, c.BaseUrl())
+		c.Data["PageHtml"] = pager.HtmlPages()
+	} else {
+		c.Data["PageHtml"] = ""
+	}
+	b, err := json.Marshal(members)
+
+	if err != nil {
+		c.Data["Result"] = template.JS("[]")
+	} else {
+		c.Data["Result"] = template.JS(string(b))
+	}
+}
+
+func (c *BookController) TeamAdd() {
+	c.Prepare()
+
+	teamId, _ := c.GetInt("teamId")
+
+	book, err := c.IsPermission()
+
+	if err != nil {
+		c.JsonResult(500, err.Error())
+		return
+	}
+	//如果不是创始人也不是管理员则不能操作
+	if book.RoleId != conf.BookFounder && book.RoleId != conf.BookAdmin {
+		c.Abort("403")
+	}
+	_, err = models.NewTeam().First(teamId, "team_id")
+	if err != nil {
+		if err == orm.ErrNoRows {
+			c.JsonResult(500, "团队不存在")
+		}
+		c.JsonResult(5002, err.Error())
+	}
+	if _, err := models.NewTeamRelationship().FindByBookId(book.BookId, teamId); err == nil {
+		c.JsonResult(5003, "团队已加入当前项目")
+	}
+	teamRel := models.NewTeamRelationship()
+	teamRel.BookId = book.BookId
+	teamRel.TeamId = teamId
+	err = teamRel.Save()
+	if err != nil {
+		c.JsonResult(5004, "加入项目失败")
+		return
+	}
+	teamRel.Include()
+
+	c.JsonResult(0, "OK", teamRel)
+}
+
+//删除项目的团队.
+func (c *BookController) TeamDelete() {
+	c.Prepare()
+
+	teamId, _ := c.GetInt("teamId")
+
+	if teamId <= 0 {
+		c.JsonResult(5001, "参数错误")
+	}
+	book, err := c.IsPermission()
+
+	if err != nil {
+		c.JsonResult(5002, err.Error())
+		return
+	}
+	//如果不是创始人也不是管理员则不能操作
+	if book.RoleId != conf.BookFounder && book.RoleId != conf.BookAdmin {
+		c.Abort("403")
+	}
+
+	err = models.NewTeamRelationship().DeleteByBookId(book.BookId, teamId)
+
+	if err != nil {
+		if err == orm.ErrNoRows {
+			c.JsonResult(5003, "团队未加入项目")
+		}
+		c.JsonResult(5004, err.Error())
+	}
+	c.JsonResult(0, "OK")
+}
+
+//团队搜索.
+func (c *BookController) TeamSearch() {
+	c.Prepare()
+
+	keyword := strings.TrimSpace(c.GetString("q"))
+
+	book, err := c.IsPermission()
+
+	if err != nil {
+		c.JsonResult(500, err.Error())
+	}
+	keyword = sqltil.EscapeLike(keyword)
+	searchResult, err := models.NewTeamRelationship().FindNotJoinBookByBookIdentify(book.BookId, keyword, 10)
+
+	if err != nil {
+		c.JsonResult(500, err.Error(), searchResult)
+	}
+	c.JsonResult(0, "OK", searchResult)
+
+}
+
+//项目空间搜索.
+func (c *BookController) ItemsetsSearch() {
+	c.Prepare()
+
+	keyword := strings.TrimSpace(c.GetString("q"))
+	keyword = sqltil.EscapeLike(keyword)
+
+	searchResult, err := models.NewItemsets().FindItemsetsByName(keyword, 10)
+
+	if err != nil {
+		c.JsonResult(500, err.Error(), searchResult)
+	}
+	c.JsonResult(0, "OK", searchResult)
+
+}
+
 func (c *BookController) IsPermission() (*models.BookResult, error) {
 	identify := c.GetString("identify")
+
+	if identify == "" {
+		return nil, errors.New("参数错误")
+	}
 
 	book, err := models.NewBookResult().FindByIdentify(identify, c.Member.MemberId)
 

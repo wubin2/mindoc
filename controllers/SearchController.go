@@ -6,6 +6,7 @@ import (
 	"github.com/lifei6671/mindoc/models"
 	"github.com/lifei6671/mindoc/utils"
 	"github.com/lifei6671/mindoc/utils/pagination"
+	"github.com/lifei6671/mindoc/utils/sqltil"
 	"strconv"
 	"strings"
 )
@@ -36,10 +37,10 @@ func (c *SearchController) Index() {
 		if c.Member != nil {
 			memberId = c.Member.MemberId
 		}
-		searchResult, totalCount, err := models.NewDocumentSearchResult().FindToPager(keyword, pageIndex, conf.PageSize, memberId)
+		searchResult, totalCount, err := models.NewDocumentSearchResult().FindToPager(sqltil.EscapeLike(keyword), pageIndex, conf.PageSize, memberId)
 
 		if err != nil {
-			beego.Error("查询搜索结果失败 => ",err)
+			beego.Error("搜索失败 ->",err)
 			return
 		}
 		if totalCount > 0 {
@@ -49,22 +50,24 @@ func (c *SearchController) Index() {
 			c.Data["PageHtml"] = ""
 		}
 		if len(searchResult) > 0 {
+			keywords := strings.Split(keyword," ")
+
 			for _, item := range searchResult {
-				item.DocumentName = strings.Replace(item.DocumentName, keyword, "<em>"+keyword+"</em>", -1)
+				for _,word := range keywords {
+					item.DocumentName = strings.Replace(item.DocumentName, word, "<em>"+word+"</em>", -1)
+					if item.Description != "" {
+						src := item.Description
 
-				if item.Description != "" {
-					src := item.Description
+						r := []rune(utils.StripTags(item.Description))
 
-					r := []rune(utils.StripTags(item.Description))
-
-					if len(r) > 100 {
-						src = string(r[:100])
-					} else {
-						src = string(r)
+						if len(r) > 100 {
+							src = string(r[:100])
+						} else {
+							src = string(r)
+						}
+						item.Description = strings.Replace(src, word, "<em>"+word+"</em>", -1)
 					}
-					item.Description = strings.Replace(src, keyword, "<em>"+keyword+"</em>", -1)
 				}
-
 				if item.Identify == "" {
 					item.Identify = strconv.Itoa(item.DocumentId)
 				}
@@ -85,6 +88,7 @@ func (c *SearchController) User() {
 	if key == "" || keyword == "" {
 		c.JsonResult(404, "参数错误")
 	}
+	keyword = sqltil.EscapeLike(keyword)
 
 	book, err := models.NewBookResult().FindByIdentify(key, c.Member.MemberId)
 	if err != nil {
@@ -94,7 +98,8 @@ func (c *SearchController) User() {
 		c.JsonResult(500, "项目不存在")
 	}
 
-	members, err := models.NewMemberRelationshipResult().FindNotJoinUsersByAccount(book.BookId, 10, "%"+keyword+"%")
+	//members, err := models.NewMemberRelationshipResult().FindNotJoinUsersByAccount(book.BookId, 10, "%"+keyword+"%")
+	members, err := models.NewMemberRelationshipResult().FindNotJoinUsersByAccountOrRealName(book.BookId, 10, "%"+keyword+"%")
 	if err != nil {
 		beego.Error("查询用户列表出错：" + err.Error())
 		c.JsonResult(500, err.Error())
@@ -105,7 +110,7 @@ func (c *SearchController) User() {
 	for _, member := range members {
 		item := models.KeyValueItem{}
 		item.Id = member.MemberId
-		item.Text = member.Account
+		item.Text = member.Account + "[" + member.RealName + "]"
 		items = append(items, item)
 	}
 

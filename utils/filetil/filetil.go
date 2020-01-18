@@ -151,12 +151,16 @@ func AbsolutePath(p string) (string, error) {
 }
 
 // FileExists reports whether the named file or directory exists.
-func FileExists(name string) bool {
-	if _, err := os.Stat(name); err != nil {
-		return false
-	}else{
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
 		return true
 	}
+	if os.IsNotExist(err) {
+		return false
+	}
+
+	return false
 }
 
 func FormatBytes(size int64) string {
@@ -220,6 +224,18 @@ func HasFileOfExt(path string,exts []string) bool {
 
 	return err == os.ErrExist
 }
+// IsImageExt 判断是否是图片后缀
+func IsImageExt(filename string) bool {
+	ext := filepath.Ext(filename)
+
+	return strings.EqualFold(ext, ".jpg") ||
+		strings.EqualFold(ext, ".jpeg") ||
+		strings.EqualFold(ext, ".png") ||
+		strings.EqualFold(ext, ".gif") ||
+		strings.EqualFold(ext,".svg") ||
+		strings.EqualFold(ext,".bmp") ||
+		strings.EqualFold(ext,".webp")
+}
 //忽略字符串中的BOM头
 func ReadFileAndIgnoreUTF8BOM(filename string) ([]byte,error) {
 
@@ -237,21 +253,4 @@ func ReadFileAndIgnoreUTF8BOM(filename string) ([]byte,error) {
 
 
 	return data,nil
-
-	//fd, err := os.Open(filename)
-	//
-	//if err != nil {
-	//	return nil,err
-	//}
-	//bom := [3]byte{}
-	//
-	//_, err = io.ReadFull(fd, bom[:])
-	//if err != nil {
-	//	return nil,err
-	//}
-	//if bom[0] != 0xef || bom[1] != 0xbb || bom[2] != 0xbf {
-	//	_, err = fd.Seek(0, 0)
-	//}
-	//
-	//return ioutil.ReadAll(fd)
 }
