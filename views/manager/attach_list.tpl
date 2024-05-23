@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>附件管理 - Powered by MinDoc</title>
+    <title>{{i18n .Lang "mgr.attachment_mgr"}} - Powered by MinDoc</title>
 
     <!-- Bootstrap -->
     <link href="{{cdncss "/static/bootstrap/css/bootstrap.min.css"}}" rel="stylesheet" type="text/css">
@@ -24,11 +24,12 @@
     {{template "widgets/header.tpl" .}}
     <div class="container manual-body">
         <div class="row">
-        {{template "manager/widgets.tpl" "attach"}}
+        {{template "manager/widgets.tpl" .}}
             <div class="page-right">
                 <div class="m-box">
-                    <div class="box-head">
-                        <strong class="box-title">附件管理</strong>
+                    <div class="box-head" id="attachAll">
+                        <strong class="box-title">{{i18n .Lang "mgr.attachment_mgr"}}</strong>
+                        <button type="button" data-method="clean" class="btn btn-danger btn-sm" data-loading-text="{{i18n $.Lang "message.processing"}}">{{i18n $.Lang "common.clean"}}</button>
                     </div>
                 </div>
                 <div class="box-body">
@@ -37,11 +38,11 @@
                             <thead>
                             <tr>
                                 <th>#</th>
-                                <th>附件名称</th>
-                                <th>项目/文章名称</th>
-                                <th>文件大小</th>
-                                <th>是否存在</th>
-                                <th>操作</th>
+                                <th>{{i18n .Lang "mgr.attachment_name"}}</th>
+                                <th>{{i18n .Lang "mgr.proj_blog_name"}}</th>
+                                <th>{{i18n .Lang "mgr.file_size"}}</th>
+                                <th>{{i18n .Lang "mgr.is_exist"}}</th>
+                                <th>{{i18n .Lang "common.operate"}}</th>
                             </tr>
                             </thead>
                             <tbody>
@@ -51,15 +52,15 @@
                                 <td>{{$item.FileName}}</td>
                                 <td>{{$item.BookName}}</td>
                                 <td>{{$item.FileShortSize}}</td>
-                                <td>{{ if $item.IsExist }} 是{{else}}否{{end}}</td>
+                                <td>{{ if $item.IsExist }} {{i18n $.Lang "commont.yes"}}{{else}}{{i18n $.Lang "common.no"}}{{end}}</td>
                                 <td>
-                                    <button type="button" data-method="delete" class="btn btn-danger btn-sm" data-id="{{$item.AttachmentId}}" data-loading-text="删除中...">删除</button>
-                                    <a href="{{urlfor "ManagerController.AttachDetailed" ":id" $item.AttachmentId}}" class="btn btn-success btn-sm">详情</a>
+                                    <button type="button" data-method="delete" class="btn btn-danger btn-sm" data-id="{{$item.AttachmentId}}" data-loading-text="{{i18n $.Lang "message.processing"}}">{{i18n $.Lang "common.delete"}}</button>
+                                    <a href="{{urlfor "ManagerController.AttachDetailed" ":id" $item.AttachmentId}}" class="btn btn-success btn-sm">{{i18n $.Lang "common.detail"}}</a>
 
                                 </td>
                             </tr>
                             {{else}}
-                            <tr><td class="text-center" colspan="6">暂无数据</td></tr>
+                            <tr><td class="text-center" colspan="6">{{i18n .Lang "message.no_data"}}</td></tr>
                             {{end}}
                             </tbody>
                         </table>
@@ -97,7 +98,30 @@
                     }
                 },
                 error : function () {
-                    layer.msg("服务器异常");
+                    layer.msg({{i18n .Lang "message.system_error"}});
+                },
+                complete : function () {
+                    $this.button("reset");
+                }
+            });
+        });
+
+        $("#attachAll").on("click","button[data-method='clean']",function () {
+            var $this = $(this);
+            $(this).button("loading");
+            $.ajax({
+                url : "{{urlfor "ManagerController.AttachClean"}}",
+                type : "post",
+                dataType : "json",
+                success : function (res) {
+                    if(res.errcode === 0){
+                        alert("done");
+                    }else {
+                        layer.msg(res.message);
+                    }
+                },
+                error : function () {
+                    layer.msg({{i18n .Lang "message.system_error"}});
                 },
                 complete : function () {
                     $this.button("reset");

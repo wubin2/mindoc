@@ -1,16 +1,17 @@
 package models
 
 import (
-	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/mindoc/conf"
 	"strings"
-	"github.com/astaxie/beego"
+
+	"github.com/beego/beego/v2/client/orm"
+	"github.com/beego/beego/v2/core/logs"
+	"github.com/mindoc-org/mindoc/conf"
 )
 
 type Label struct {
-	LabelId    int    `orm:"column(label_id);pk;auto;unique;" json:"label_id"`
-	LabelName  string `orm:"column(label_name);size(50);unique" json:"label_name"`
-	BookNumber int    `orm:"column(book_number)" json:"book_number"`
+	LabelId    int    `orm:"column(label_id);pk;auto;unique;description(项目标签id)" json:"label_id"`
+	LabelName  string `orm:"column(label_name);size(50);unique;description(项目标签名称)" json:"label_name"`
+	BookNumber int    `orm:"column(book_number);description(包涵项目数量)" json:"book_number"`
 }
 
 // TableName 获取对应数据库表名.
@@ -73,10 +74,11 @@ func (m *Label) InsertOrUpdateMulti(labels string) {
 		}
 	}
 }
+
 //删除标签
 func (m *Label) Delete() error {
 	o := orm.NewOrm()
-	_,err := o.Raw("DELETE FROM " + m.TableNameWithPrefix() + " WHERE label_id= ?",m.LabelId).Exec()
+	_, err := o.Raw("DELETE FROM "+m.TableNameWithPrefix()+" WHERE label_id= ?", m.LabelId).Exec()
 
 	if err != nil {
 		return err
@@ -100,13 +102,9 @@ func (m *Label) FindToPager(pageIndex, pageSize int) (labels []*Label, totalCoun
 	_, err = o.QueryTable(m.TableNameWithPrefix()).OrderBy("-book_number").Offset(offset).Limit(pageSize).All(&labels)
 
 	if err == orm.ErrNoRows {
-		beego.Info("没有查询到标签 ->",err)
+		logs.Info("没有查询到标签 ->", err)
 		err = nil
 		return
 	}
 	return
 }
-
-
-
-

@@ -1,14 +1,15 @@
 package utils
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
+
 	"github.com/PuerkitoBio/goquery"
-	"bytes"
-	"github.com/lifei6671/mindoc/conf"
+	"github.com/mindoc-org/mindoc/conf"
 )
 
-func StripTags(s string) string  {
+func StripTags(s string) string {
 
 	//将HTML标签全转换成小写
 	re, _ := regexp.Compile("\\<[\\S\\s]+?\\>")
@@ -32,8 +33,9 @@ func StripTags(s string) string  {
 
 	return src
 }
-//自动提取文章摘要
-func AutoSummary(body string,l int) string {
+
+// 自动提取文章摘要
+func AutoSummary(body string, l int) string {
 
 	//匹配图片，如果图片语法是在代码块中，这里同样会处理
 	re := regexp.MustCompile(`<p>(.*?)</p>`)
@@ -41,11 +43,11 @@ func AutoSummary(body string,l int) string {
 	contents := re.FindAllString(body, -1)
 
 	if len(contents) <= 0 {
-		return  ""
+		return ""
 	}
 	content := ""
-	for _,s := range contents {
-		b := strings.Replace(StripTags(s),"\n","", -1)
+	for _, s := range contents {
+		b := strings.Replace(StripTags(s), "\n", "", -1)
 
 		if l <= 0 {
 			break
@@ -58,7 +60,7 @@ func AutoSummary(body string,l int) string {
 	return content
 }
 
-//安全处理HTML文档，过滤危险标签和属性.
+// 安全处理HTML文档，过滤危险标签和属性.
 func SafetyProcessor(html string) string {
 
 	//安全过滤，移除危险标签和属性
@@ -69,7 +71,9 @@ func SafetyProcessor(html string) string {
 		docQuery.Find("applet").Remove()
 		docQuery.Find("frame").Remove()
 		docQuery.Find("meta").Remove()
-		docQuery.Find("iframe").Remove()
+		if !conf.GetEnableIframe() {
+			docQuery.Find("iframe").Remove()
+		}
 		docQuery.Find("*").Each(func(i int, selection *goquery.Selection) {
 
 			if href, ok := selection.Attr("href"); ok && strings.HasPrefix(href, "javascript:") {
@@ -106,19 +110,20 @@ func SafetyProcessor(html string) string {
 			}
 		})
 		//添加文档标签包裹
-		if selector := docQuery.Find("article.markdown-article-inner").First(); selector.Size() <= 0 {
-			docQuery.Children().WrapAllHtml("<article class=\"markdown-article-inner\"></article>")
+		if selector := docQuery.Find("div.whole-article-wrap").First(); selector.Size() <= 0 {
+			docQuery.Find("body").Children().WrapAllHtml("<div class=\"whole-article-wrap\"></div>")
 		}
 		//解决文档内容缺少包裹标签的问题
 		if selector := docQuery.Find("div.markdown-article").First(); selector.Size() <= 0 {
 			if selector := docQuery.Find("div.markdown-toc").First(); selector.Size() > 0 {
 				docQuery.Find("div.markdown-toc").NextAll().WrapAllHtml("<div class=\"markdown-article\"></div>")
+			} else if selector := docQuery.Find("dir.toc").First(); selector.Size() > 0 {
+				docQuery.Find("dir.toc").NextAll().WrapAllHtml("<div class=\"markdown-article\"></div>")
 			}
 		}
 
-
 		if html, err := docQuery.Html(); err == nil {
-			return  strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(html), "<html><head></head><body>"), "</body></html>")
+			return strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(html), "<html><head></head><body>"), "</body></html>")
 		}
 	}
 	return html

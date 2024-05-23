@@ -2,20 +2,21 @@ package models
 
 import (
 	"errors"
-	"github.com/astaxie/beego/logs"
-	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/mindoc/conf"
+
+	"github.com/beego/beego/v2/client/orm"
+	"github.com/beego/beego/v2/core/logs"
+	"github.com/mindoc-org/mindoc/conf"
 )
 
 type Relationship struct {
 	RelationshipId int `orm:"pk;auto;unique;column(relationship_id)" json:"relationship_id"`
-	MemberId       int `orm:"column(member_id);type(int)" json:"member_id"`
-	BookId         int `orm:"column(book_id);type(int)" json:"book_id"`
+	MemberId       int `orm:"column(member_id);type(int);description(作者id)" json:"member_id"`
+	BookId         int `orm:"column(book_id);type(int);description(所属项目id)" json:"book_id"`
 	// RoleId 角色：0 创始人(创始人不能被移除) / 1 管理员/2 编辑者/3 观察者
-	RoleId conf.BookRole `orm:"column(role_id);type(int)" json:"role_id"`
+	RoleId conf.BookRole `orm:"column(role_id);type(int);description(角色-配置文件里写死：0 创始人-不能被移除 / 1 管理员/2 编辑者/3 观察者)" json:"role_id"`
 }
 
-// TableName 获取对应数据库表名.
+// TableName 获取对应数据库表名. 用户和项目的关联表
 func (m *Relationship) TableName() string {
 	return "relationship"
 }
@@ -35,7 +36,7 @@ func (m *Relationship) TableUnique() [][]string {
 	}
 }
 
-func (m *Relationship) QueryTable() orm.QuerySeter  {
+func (m *Relationship) QueryTable() orm.QuerySeter {
 	return orm.NewOrm().QueryTable(m.TableNameWithPrefix())
 }
 func NewRelationship() *Relationship {
@@ -99,8 +100,7 @@ func (m *Relationship) FindForRoleId(bookId, memberId int) (conf.BookRole, error
 	err := o.QueryTable(m.TableNameWithPrefix()).Filter("book_id", bookId).Filter("member_id", memberId).One(relationship)
 
 	if err != nil {
-
-		return 0, err
+		return conf.BookRoleNoSpecific, err
 	}
 	return relationship.RoleId, nil
 }
@@ -121,11 +121,11 @@ func (m *Relationship) Insert() error {
 	return err
 }
 
-func (m *Relationship) Update() error {
-	o := orm.NewOrm()
-
-	_, err := o.Update(m)
-
+func (m *Relationship) Update(txOrm orm.TxOrmer) error {
+	_, err := txOrm.Update(m)
+	if err != nil {
+		txOrm.Rollback()
+	}
 	return err
 }
 
@@ -151,11 +151,11 @@ func (m *Relationship) DeleteByBookIdAndMemberId(book_id, member_id int) error {
 }
 
 func (m *Relationship) Transfer(book_id, founder_id, receive_id int) error {
-	o := orm.NewOrm()
+	ormer := orm.NewOrm()
 
 	founder := NewRelationship()
 
-	err := o.QueryTable(m.TableNameWithPrefix()).Filter("book_id", book_id).Filter("member_id", founder_id).One(founder)
+	err := ormer.QueryTable(m.TableNameWithPrefix()).Filter("book_id", book_id).Filter("member_id", founder_id).One(founder)
 
 	if err != nil {
 		return err
@@ -165,12 +165,12 @@ func (m *Relationship) Transfer(book_id, founder_id, receive_id int) error {
 	}
 	receive := NewRelationship()
 
-	err = o.QueryTable(m.TableNameWithPrefix()).Filter("book_id", book_id).Filter("member_id", receive_id).One(receive)
+	err = ormer.QueryTable(m.TableNameWithPrefix()).Filter("book_id", book_id).Filter("member_id", receive_id).One(receive)
 
 	if err != orm.ErrNoRows && err != nil {
 		return err
 	}
-	o.Begin()
+	o, _ := ormer.Begin()
 
 	founder.RoleId = conf.BookAdmin
 
@@ -178,8 +178,7 @@ func (m *Relationship) Transfer(book_id, founder_id, receive_id int) error {
 	receive.RoleId = conf.BookFounder
 	receive.BookId = book_id
 
-	if err := founder.Update(); err != nil {
-		o.Rollback()
+	if err := founder.Update(o); err != nil {
 		return err
 	}
 	if receive.RelationshipId > 0 {

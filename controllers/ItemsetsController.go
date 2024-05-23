@@ -1,16 +1,19 @@
 package controllers
 
 import (
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/models"
-	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/mindoc/utils/pagination"
-	"github.com/astaxie/beego"
+	"math"
+
+	"github.com/beego/beego/v2/client/orm"
+	"github.com/beego/beego/v2/core/logs"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/models"
+	"github.com/mindoc-org/mindoc/utils/pagination"
 )
 
 type ItemsetsController struct {
 	BaseController
 }
+
 func (c *ItemsetsController) Prepare() {
 	c.BaseController.Prepare()
 
@@ -23,7 +26,7 @@ func (c *ItemsetsController) Prepare() {
 func (c *ItemsetsController) Index() {
 	c.Prepare()
 	c.TplName = "items/index.tpl"
-	pageSize := 18
+	pageSize := 16
 
 	pageIndex, _ := c.GetInt("page", 0)
 
@@ -32,7 +35,6 @@ func (c *ItemsetsController) Index() {
 	if err != nil && err != orm.ErrNoRows {
 		c.ShowErrorPage(500, err.Error())
 	}
-	c.Data["TotalPages"] = pageIndex
 	if err == orm.ErrNoRows || len(items) <= 0 {
 		c.Data["Lists"] = items
 		c.Data["PageHtml"] = ""
@@ -45,7 +47,7 @@ func (c *ItemsetsController) Index() {
 	} else {
 		c.Data["PageHtml"] = ""
 	}
-
+	c.Data["TotalPages"] = int(math.Ceil(float64(totalCount) / float64(pageSize)))
 	c.Data["Lists"] = items
 }
 
@@ -65,7 +67,7 @@ func (c *ItemsetsController) List() {
 		if err == orm.ErrNoRows {
 			c.Abort("404")
 		} else {
-			beego.Error(err)
+			logs.Error(err)
 			c.Abort("500")
 		}
 	}
@@ -84,6 +86,7 @@ func (c *ItemsetsController) List() {
 	} else {
 		c.Data["PageHtml"] = ""
 	}
+	c.Data["TotalPages"] = int(math.Ceil(float64(totalCount) / float64(pageSize)))
 	c.Data["Lists"] = searchResult
 
 	c.Data["Model"] = item

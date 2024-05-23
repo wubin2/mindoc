@@ -1,6 +1,6 @@
 package models
 
-import "github.com/astaxie/beego/orm"
+import "github.com/beego/beego/v2/client/orm"
 
 type CommentResult struct {
 	Comment
@@ -16,10 +16,10 @@ func (m *CommentResult) FindForDocumentToPager(doc_id, page_index, page_size int
 SELECT
   comment.* ,
   parent.* ,
-  member.account AS author,
+  mdmb.account AS author,
   p_member.account AS reply_account
 FROM md_comments AS comment
-  LEFT JOIN md_members AS member ON comment.member_id = member.member_id
+  LEFT JOIN md_members AS mdmb ON comment.member_id = mdmb.member_id
   LEFT JOIN md_comments AS parent ON comment.parent_id = parent.comment_id
   LEFT JOIN md_members AS p_member ON p_member.member_id = parent.member_id
 

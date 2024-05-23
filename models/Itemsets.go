@@ -1,26 +1,27 @@
 package models
 
 import (
-	"time"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/astaxie/beego/orm"
-	"github.com/astaxie/beego"
 	"errors"
-	"github.com/lifei6671/mindoc/utils/cryptil"
-	"github.com/lifei6671/mindoc/utils"
 	"strings"
+	"time"
+
+	"github.com/beego/beego/v2/client/orm"
+	"github.com/beego/beego/v2/core/logs"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/utils"
+	"github.com/mindoc-org/mindoc/utils/cryptil"
 )
 
 //项目空间
 type Itemsets struct {
 	ItemId      int       `orm:"column(item_id);pk;auto;unique" json:"item_id"`
-	ItemName    string    `orm:"column(item_name);size(500)" json:"item_name"`
-	ItemKey     string    `orm:"column(item_key);size(100);unique" json:"item_key"`
-	Description string    `orm:"column(description);type(text);null" json:"description"`
-	MemberId    int       `orm:"column(member_id);size(100)" json:"member_id"`
-	CreateTime  time.Time `orm:"column(create_time);type(datetime);auto_now_add" json:"create_time"`
-	ModifyTime  time.Time `orm:"column(modify_time);type(datetime);null;auto_now" json:"modify_time"`
-	ModifyAt    int       `orm:"column(modify_at);type(int)" json:"modify_at"`
+	ItemName    string    `orm:"column(item_name);size(500);description(项目空间名称)" json:"item_name"`
+	ItemKey     string    `orm:"column(item_key);size(100);unique;description(项目空间标识)" json:"item_key"`
+	Description string    `orm:"column(description);type(text);null;description(描述)" json:"description"`
+	MemberId    int       `orm:"column(member_id);size(100);description(所属用户)" json:"member_id"`
+	CreateTime  time.Time `orm:"column(create_time);type(datetime);auto_now_add;description(创建时间)" json:"create_time"`
+	ModifyTime  time.Time `orm:"column(modify_time);type(datetime);null;auto_now;description(修改时间)" json:"modify_time"`
+	ModifyAt    int       `orm:"column(modify_at);type(int);description(修改人id)" json:"modify_at"`
 
 	BookNumber       int    `orm:"-" json:"book_number"`
 	CreateTimeString string `orm:"-" json:"create_time_string"`
@@ -54,7 +55,7 @@ func (item *Itemsets) First(itemId int) (*Itemsets, error) {
 	}
 	err := item.QueryTable().Filter("item_id", itemId).One(item)
 	if err != nil {
-		beego.Error("查询项目空间失败 -> item_id=", itemId, err)
+		logs.Error("查询项目空间失败 -> item_id=", itemId, err)
 	} else {
 		item.Include()
 	}
@@ -64,7 +65,7 @@ func (item *Itemsets) First(itemId int) (*Itemsets, error) {
 func (item *Itemsets) FindFirst(itemKey string) (*Itemsets, error) {
 	err := item.QueryTable().Filter("item_key", itemKey).One(item)
 	if err != nil {
-		beego.Error("查询项目空间失败 -> itemKey=", itemKey, err)
+		logs.Error("查询项目空间失败 -> itemKey=", itemKey, err)
 	} else {
 		item.Include()
 	}
@@ -111,19 +112,20 @@ func (item *Itemsets) Delete(itemId int) (err error) {
 	if !item.Exist(itemId) {
 		return errors.New("项目空间不存在")
 	}
-	o := orm.NewOrm()
-	if err := o.Begin(); err != nil {
-		beego.Error("开启事物失败 ->", err)
+	ormer := orm.NewOrm()
+	o, err := ormer.Begin()
+	if err != nil {
+		logs.Error("开启事物失败 ->", err)
 		return err
 	}
 	_, err = o.QueryTable(item.TableNameWithPrefix()).Filter("item_id", itemId).Delete()
 	if err != nil {
-		beego.Error("删除项目空间失败 -> item_id=", itemId, err)
+		logs.Error("删除项目空间失败 -> item_id=", itemId, err)
 		o.Rollback()
 	}
 	_, err = o.Raw("update md_books set item_id=1 where item_id=?;", itemId).Exec()
 	if err != nil {
-		beego.Error("删除项目空间失败 -> item_id=", itemId, err)
+		logs.Error("删除项目空间失败 -> item_id=", itemId, err)
 		o.Rollback()
 	}
 
@@ -189,7 +191,7 @@ func (item *Itemsets) FindItemsetsByName(name string, limit int) (*SelectMemberR
 		_, err = item.QueryTable().Filter("item_name__icontains", name).Limit(limit).All(&itemsets)
 	}
 	if err != nil {
-		beego.Error("查询项目空间失败 ->", err)
+		logs.Error("查询项目空间失败 ->", err)
 		return &result, err
 	}
 
@@ -213,7 +215,7 @@ func (item *Itemsets) FindItemsetsByItemKey(key string, pageIndex, pageSize, mem
 	err = item.QueryTable().Filter("item_key", key).One(item)
 
 	if err != nil {
-		beego.Error("查询项目空间时出错 ->", key, err)
+		logs.Error("查询项目空间时出错 ->", key, err)
 		return nil, 0, err
 	}
 	offset := (pageIndex - 1) * pageSize
@@ -231,10 +233,10 @@ WHERE book.item_id = ? AND (book.privately_owned = 0 or rel.role_id >= 0 or team
 
 		err = o.Raw(sql1, memberId, memberId, item.ItemId).QueryRow(&totalCount)
 		if err != nil {
-			beego.Error("查询项目空间时出错 ->", key, err)
+			logs.Error("查询项目空间时出错 ->", key, err)
 			return
 		}
-		sql2 := `SELECT book.*,rel1.*,member.account AS create_name FROM md_books AS book
+		sql2 := `SELECT book.*,rel1.*,mdmb.account AS create_name FROM md_books AS book
 			LEFT JOIN md_relationship AS rel ON rel.book_id = book.book_id AND rel.member_id = ?
 			left join (select book_id,min(role_id) as role_id from (select book_id,role_id
                    	from md_team_relationship as mtr
@@ -242,11 +244,11 @@ WHERE book.item_id = ? AND (book.privately_owned = 0 or rel.role_id >= 0 or team
 as t group by book_id) as team 
 					on team.book_id = book.book_id
 			LEFT JOIN md_relationship AS rel1 ON rel1.book_id = book.book_id AND rel1.role_id = 0
-			LEFT JOIN md_members AS member ON rel1.member_id = member.member_id
+			LEFT JOIN md_members AS mdmb ON rel1.member_id = mdmb.member_id
 			WHERE book.item_id = ? AND (book.privately_owned = 0 or rel.role_id >= 0 or team.role_id >= 0) 
-			ORDER BY order_index desc,book.book_id DESC LIMIT ?,?`
+			ORDER BY order_index desc,book.book_id DESC limit ? offset ?`
 
-		_, err = o.Raw(sql2, memberId, memberId, item.ItemId, offset, pageSize).QueryRows(&books)
+		_, err = o.Raw(sql2, memberId, memberId, item.ItemId, pageSize, offset).QueryRows(&books)
 
 		return
 
@@ -259,12 +261,12 @@ as t group by book_id) as team
 		}
 		totalCount = int(count)
 
-		sql := `SELECT book.*,rel.*,member.account AS create_name FROM md_books AS book
+		sql := `SELECT book.*,rel.*,mdmb.account AS create_name FROM md_books AS book
 			LEFT JOIN md_relationship AS rel ON rel.book_id = book.book_id AND rel.role_id = 0
-			LEFT JOIN md_members AS member ON rel.member_id = member.member_id
-			WHERE book.item_id = ? AND book.privately_owned = 0 ORDER BY order_index desc,book.book_id DESC LIMIT ?,?`
+			LEFT JOIN md_members AS mdmb ON rel.member_id = mdmb.member_id
+			WHERE book.item_id = ? AND book.privately_owned = 0 ORDER BY order_index desc,book.book_id DESC limit ? offset ?`
 
-		_, err = o.Raw(sql, item.ItemId, offset, pageSize).QueryRows(&books)
+		_, err = o.Raw(sql, item.ItemId, pageSize, offset).QueryRows(&books)
 
 		return
 
