@@ -77,26 +77,39 @@ function pageClicked($page, $docid) {
     });
 }
 
+function renderOperateSection(comment) {
+    const deleteIcon = comment.show_del == 1
+        ? `<i class="delete e-delete glyphicon glyphicon-remove" onclick="onDelComment(${comment.comment_id})"></i>`
+        : '';
+
+    return `
+        <span class="operate ${comment.show_del == 1 ? 'toggle' : ''}">
+            <span class="number">${comment.index}#</span>
+            ${deleteIcon}
+        </span>`;
+}
+
 // 加载评论
 function loadComment($page, $docid) {
     $("#commentList").empty();
-    var html = ""
-    var c = $page.List;
-    for (var i = 0; c && i < c.length; i++) {
-        html += "<div class=\"comment-item\" data-id=\"" + c[i].comment_id + "\">";
-        html += "<p class=\"info\"><a class=\"name\">" + c[i].author + "</a><span class=\"date\">" + timeFormat(c[i].comment_date) + "</span></p>";
-        html += "<div class=\"content\">" + c[i].content + "</div>";
-        html += "<p class=\"util\">";
-        if (c[i].show_del == 1) html += "<span class=\"operate toggle\">";
-        else html += "<span class=\"operate\">";
-        html += "<span class=\"number\">" + c[i].index + "#</span>";
-        if (c[i].show_del == 1) html += "<i class=\"delete e-delete glyphicon glyphicon-remove\" style=\"color:red\" onclick=\"onDelComment(" + c[i].comment_id + ")\"></i>";
-        html += "</span>";
-        html += "</p>";
-        html += "</div>";
+    let html = ""
+    let c = $page.List;
+    for (let i = 0; c && i < c.length; i++) {
+        const comment = c[i];
+        html += `
+        <div class="comment-item" data-id="${comment.comment_id}">
+            <p class="info">
+                <img src="${comment.avatar}" alt="">
+                <a class="name">${comment.author}</a>
+                <span class="date">${timeFormat(comment.comment_date)}</span>
+            </p>
+            <div class="content">${comment.content}</div>
+            <p class="util">
+                ${renderOperateSection(comment)}
+            </p>
+        </div>`;
     }
     $("#commentList").append(html);
-
     if ($page.TotalPage > 1) {
         $("#page").bootstrapPaginator({
             currentPage: $page.PageNo,
@@ -114,7 +127,6 @@ function loadComment($page, $docid) {
 
 // 删除评论
 function onDelComment($id) {
-    console.log($id);
     $.ajax({
         url: "/comment/delete",
         data: { "id": $id },
@@ -141,11 +153,10 @@ function renderPage($data) {
     $("#article-info").text($data.doc_info);
     $("#view_count").text("阅读次数：" + $data.view_count);
     $("#doc_id").val($data.doc_id);
+    checkMarkdownTocElement();
     if ($data.page) {
         loadComment($data.page, $data.doc_id);
-
-    }
-    else {
+    } else {
         pageClicked(-1, $data.doc_id);
     }
 
@@ -156,6 +167,7 @@ function renderPage($data) {
         $("#view_container").removeClass("theme__dark theme__green theme__light theme__red theme__default")
         $("#view_container").addClass($data.markdown_theme)
     }
+
 }
 
 /***
@@ -229,7 +241,24 @@ function initHighlighting() {
     }
 }
 
+function handleEvent(event) {
+    switch (event.keyCode) {
+        case 70: // ctrl + f 打开搜索面板 并获取焦点
+            $(".navg-item[data-mode='search']").click();
+            document.getElementById('searchForm').querySelector('input').focus();
+            event.preventDefault();
+            break;
+        case 27: // esc 关闭搜索面板
+            $(".navg-item[data-mode='view']").click();
+            event.preventDefault();
+            break;
+    }
+}
+
 $(function () {
+    window.addEventListener('keydown', handleEvent)
+
+    checkMarkdownTocElement();
     $(".view-backtop").on("click", function () {
         $('.manual-right').animate({ scrollTop: '0px' }, 200);
     });
@@ -280,7 +309,7 @@ $(function () {
 
 
     $(window).resize(function (e) {
-        var h = $(".manual-catalog").innerHeight() - 20;
+        var h = $(".manual-catalog").innerHeight() - 50;
         $(".markdown-toc").height(h);
     }).resize();
 
@@ -332,6 +361,11 @@ $(function () {
         var mode = $(this).data('mode');
         $(this).siblings().removeClass('active').end().addClass('active');
         $(".m-manual").removeClass("manual-mode-view manual-mode-collect manual-mode-search").addClass("manual-mode-" + mode);
+    });
+
+    const input = document.getElementById('searchForm').querySelector('input');
+    input.addEventListener('input', function() {
+        $("#btnSearch").click();
     });
 
     /**
@@ -417,4 +451,21 @@ function loadCopySnippets() {
     [].forEach.call(snippets, function (snippet) {
         Prism.highlightElement(snippet);
     });
+}
+
+function checkMarkdownTocElement() {
+    let toc = $(".markdown-toc-list");
+    if ($(".toc").length) {
+        toc = $(".toc");
+    }
+    let articleComment = $("#articleComment");
+    if (toc.length) {
+        $(".wiki-bottom-left").css("width", "calc(100% - 260px)");
+        articleComment.css("width", "calc(100% - 260px)");
+        articleComment.css("margin", "30px 0 70px 0");
+    } else {
+        $(".wiki-bottom-left").css("width", "100%");
+        articleComment.css("width", "100%");
+        articleComment.css("margin", "30px auto 70px auto;");
+    }
 }
